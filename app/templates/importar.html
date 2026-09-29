@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Testutik sortu · Errezetak{% endblock %}
+{% block content %}
+<h1>✨ Errezeta testutik sortu</h1>
+<p class="intro">Itsatsi errezeta testu arruntean: izenburua, osagaiak, prestaketa, denborak… Adimen artifizialak
+  eremuak aterako ditu, eta gorde aurretik berrikusi ahal izango dituzu.</p>
+
+{% if error %}
+<div class="errores"><ul><li>{{ error }}</li></ul></div>
+{% endif %}
+
+<form class="formulario panel" method="post" action="/recetas/importar" id="importar">
+  <label>Errezetaren testua
+    <textarea name="texto" rows="16" required maxlength="20000"
+      placeholder="Marmitakoa (4 lagunentzat)&#10;&#10;Osagaiak: 600 g hegalabur, 1 kg patata, tipula bat, piper berde bat…&#10;&#10;Prestaketa: Egin sofrito bat tipularekin eta piperrarekin 10 minutuz…">{{ texto }}</textarea>
+  </label>
+  <div class="acciones">
+    <button class="boton" type="submit" id="aztertu">✨ Aztertu testua</button>
+    <a class="boton secundario" href="/">Utzi</a>
+    <span class="proveedor">Eredua: {{ proveedor }}</span>
+  </div>
+</form>
+{% endblock %}
+{% block scripts %}
+<script>
+  document.getElementById("importar").addEventListener("submit", () => {
+    const b = document.getElementById("aztertu");
+    b.disabled = true;
+    b.innerHTML = '<span class="spinner"></span> Aztertzen… (minutu bat behar izan dezake)';
+  });
+</script>
+{% endblock %}

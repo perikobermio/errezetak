@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% set editando = receta and receta.id %}
+{% block title %}{{ "Errezeta editatu" if editando else "Errezeta berria" }} · Errezetak{% endblock %}
+{% block content %}
+<h1>{{ "Errezeta editatu" if editando else "Errezeta berria" }}</h1>
+
+{% if desde_ia %}
+<div class="aviso">✨ Adimen artifizialak testutik atera ditu eremu hauek. Berrikusi eta zuzendu, eta sakatu <strong>Gorde</strong>.</div>
+{% endif %}
+
+{% if errores %}
+<div class="errores"><ul>{% for e in errores %}<li>{{ e }}</li>{% endfor %}</ul></div>
+{% endif %}
+
+<form class="formulario panel" method="post" enctype="multipart/form-data"
+      action="{{ '/recetas/%s' % receta.id if editando else '/recetas' }}">
+  <label>Izenburua *
+    <input name="titulo" required maxlength="200" value="{{ receta.titulo if receta else '' }}">
+  </label>
+  <label>Deskribapena
+    <textarea name="descripcion" rows="3">{{ receta.descripcion if receta else '' }}</textarea>
+  </label>
+  <div class="fila">
+    <label>Anoak
+      <input name="raciones" type="number" min="1" value="{{ receta.raciones if receta and receta.raciones else '' }}">
+    </label>
+    <label class="crece"><span>Etiketak <small>(komaz bereizita)</small></span>
+      <input name="tags" placeholder="begetarianoa, azkarra" value="{{ receta.tags | join(', ') if receta else '' }}">
+    </label>
+  </div>
+
+  <fieldset>
+    <legend>📷 Irudia</legend>
+    {% if editando and receta.tiene_imagen %}
+      <img class="miniatura" src="/recetas/{{ receta.id }}/imagen" alt="">
+      <label class="check"><input type="checkbox" name="quitar_imagen" value="1"> Kendu uneko irudia</label>
+    {% endif %}
+    <input type="file" name="imagen" accept="image/*">
+  </fieldset>
+
+  <fieldset>
+    <legend>🥕 Osagaiak</legend>
+    <div class="lista" id="ingredientes">
+      {% for i in (receta.ingredientes if receta and receta.ingredientes else [{"nombre": "", "cantidad": ""}]) %}
+      <div class="item">
+        <input name="ingrediente_nombre" placeholder="Osagaia" value="{{ i.nombre }}">
+        <input name="ingrediente_cantidad" placeholder="Kantitatea" value="{{ i.cantidad }}" class="corto">
+        <button type="button" class="quitar" title="Kendu">✕</button>
+      </div>
+      {% endfor %}
+    </div>
+    <button type="button" class="boton secundario" data-anadir="ingredientes">+ Osagaia</button>
+  </fieldset>
+
+  <fieldset>
+    <legend>👩‍🍳 Prestaketa</legend>
+    <div class="lista" id="pasos">
+      {% for p in (receta.pasos if receta and receta.pasos else [""]) %}
+      <div class="item">
+        <textarea name="paso" rows="2" placeholder="Deskribatu urratsa">{{ p }}</textarea>
+        <button type="button" class="quitar" title="Kendu">✕</button>
+      </div>
+      {% endfor %}
+    </div>
+    <button type="button" class="boton secundario" data-anadir="pasos">+ Urratsa</button>
+  </fieldset>
+
+  <fieldset>
+    <legend>⏱ Sukaldatze-denborak</legend>
+    <div class="lista" id="tiempos">
+      {% for t in (receta.tiempos if receta and receta.tiempos else [{"fase": "", "minutos": ""}]) %}
+      <div class="item">
+        <input name="tiempo_fase" placeholder="Fasea (adib. Labea)" value="{{ t.fase }}">
+        <input name="tiempo_minutos" type="number" min="0" placeholder="min" value="{{ t.minutos }}" class="corto">
+        <button type="button" class="quitar" title="Kendu">✕</button>
+      </div>
+      {% endfor %}
+    </div>
+    <button type="button" class="boton secundario" data-anadir="tiempos">+ Denbora</button>
+  </fieldset>
+
+  <div class="acciones">
+    <button class="boton" type="submit">Gorde</button>
+    <a class="boton secundario" href="{{ '/recetas/%s' % receta.id if editando else '/' }}">Utzi</a>
+  </div>
+</form>
+{% endblock %}
+{% block scripts %}<script src="/static/form.js"></script>{% endblock %}

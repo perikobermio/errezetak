@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block hero %}
+<section class="hero">
+  <div class="hero-contenido">
+    <h1>Zer sukaldatuko dugu gaur?</h1>
+    <p>{{ recetas | length }} errezeta{{ ", etiketa hauekin: " ~ seleccion | join(" + ") if seleccion }}. Aukeratu etiketak zurea aurkitzeko.</p>
+    <div class="tags">
+      {% for t in tags %}
+        {% set activo = t.nombre in seleccion %}
+        {% if activo %}
+          {% set resto = seleccion | reject("equalto", t.nombre) | list %}
+        {% else %}
+          {% set resto = seleccion + [t.nombre] %}
+        {% endif %}
+        <a class="tag c{{ t.nombre | color_tag }} {{ 'activo' if activo }}"
+           href="/{% if resto %}?{% for s in resto %}tag={{ s | urlencode }}{{ '&' if not loop.last }}{% endfor %}{% endif %}">
+          {% if activo %}✓ {% endif %}{{ t.nombre }} <small>{{ t.total }}</small>
+        </a>
+      {% else %}
+        <p>Oraindik ez dago etiketarik.</p>
+      {% endfor %}
+      {% if seleccion %}<a class="tag limpiar" href="/">✕ kendu iragazkiak</a>{% endif %}
+    </div>
+  </div>
+</section>
+{% endblock %}
+{% block content %}
+<section class="rejilla">
+  {% for r in recetas %}
+    <a class="tarjeta" href="/recetas/{{ r.id }}">
+      <div class="foto">
+        <img src="/recetas/{{ r.id }}/imagen" alt="{{ r.titulo }}" loading="lazy">
+        {% if r.minutos_totales %}<span class="badge">⏱ {{ r.minutos_totales }} min</span>{% endif %}
+      </div>
+      <div class="cuerpo">
+        <h3>{{ r.titulo }}</h3>
+        <p>{{ r.descripcion | truncate(110) }}</p>
+        <div class="tags pequenos">
+          {% for t in r.tags %}<span class="tag c{{ t | color_tag }}">{{ t }}</span>{% endfor %}
+        </div>
+        {% if r.raciones %}<div class="meta">🍽 {{ r.raciones }} anoa</div>{% endif %}
+      </div>
+    </a>
+  {% else %}
+    <div class="vacio-grande">
+      <span>🥄</span>
+      <p>{{ "Ez dago errezetarik etiketa horiekin." if seleccion else "Oraindik ez dago errezetarik." }}</p>
+      <a class="boton" href="/recetas/nueva">Sortu lehenengoa</a>
+    </div>
+  {% endfor %}
+</section>
+{% endblock %}

@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}{{ receta.titulo }} · Errezetak{% endblock %}
+{% block content %}
+<article class="receta">
+  <div class="portada">
+    <img src="/recetas/{{ receta.id }}/imagen" alt="{{ receta.titulo }}">
+  </div>
+  <div class="ficha">
+    <div class="cabecera">
+      <h1>{{ receta.titulo }}</h1>
+      <div class="acciones">
+        <a class="boton secundario" href="/recetas/{{ receta.id }}/editar">✏️ Editatu</a>
+        <form method="post" action="/recetas/{{ receta.id }}/borrar" onsubmit="return confirm('Errezeta hau ezabatu nahi duzu?')">
+          <button class="boton peligro">🗑 Ezabatu</button>
+        </form>
+      </div>
+    </div>
+    {% if receta.descripcion %}<p class="descripcion">{{ receta.descripcion }}</p>{% endif %}
+    <div class="chips">
+      {% if receta.minutos_totales %}<span class="chip naranja">⏱ {{ receta.minutos_totales }} min</span>{% endif %}
+      {% if receta.raciones %}<span class="chip verde">🍽 {{ receta.raciones }} anoa</span>{% endif %}
+      <span class="chip amarillo">🥕 {{ receta.ingredientes | length }} osagai</span>
+    </div>
+    <div class="tags">
+      {% for t in receta.tags %}<a class="tag c{{ t | color_tag }}" href="/?tag={{ t | urlencode }}">{{ t }}</a>{% endfor %}
+    </div>
+  </div>
+
+  <div class="columnas">
+    <div>
+      <section class="panel">
+        <h2>🥕 Osagaiak</h2>
+        <ul class="ingredientes">
+          {% for i in receta.ingredientes %}
+            <li><span>{{ i.nombre }}</span><span class="cantidad">{{ i.cantidad }}</span></li>
+          {% else %}<li class="vacio">Osagairik ez.</li>{% endfor %}
+        </ul>
+      </section>
+      <section class="panel">
+        <h2>⏱ Denborak</h2>
+        <ul class="tiempos">
+          {% for t in receta.tiempos %}
+            <li>
+              <span>{{ t.fase }}</span><span>{{ t.minutos }} min</span>
+              {% if receta.minutos_totales %}<i style="width: {{ (100 * t.minutos / receta.minutos_totales) | round(1) }}%"></i>{% endif %}
+            </li>
+          {% else %}<li class="vacio">Denborarik ez.</li>{% endfor %}
+          {% if receta.tiempos %}<li class="total"><span>Guztira</span><span>{{ receta.minutos_totales }} min</span></li>{% endif %}
+        </ul>
+      </section>
+    </div>
+    <section class="panel">
+      <h2>👩‍🍳 Prestaketa</h2>
+      <ol class="pasos">
+        {% for p in receta.pasos %}<li>{{ p }}</li>{% else %}<li class="vacio">Urratsik ez.</li>{% endfor %}
+      </ol>
+    </section>
+  </div>
+</article>
+{% endblock %}

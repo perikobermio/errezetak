@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="eu">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>{% block title %}Errezetak{% endblock %}</title>
+  <link rel="stylesheet" href="/static/fonts.css">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="marca" href="/"><span class="logo">🍳</span> Errezetak</a>
+    <nav class="menu">
+      <a class="boton secundario" href="/recetas/importar">✨ Testutik sortu</a>
+      <a class="boton" href="/recetas/nueva">+ Errezeta berria</a>
+    </nav>
+  </header>
+  {% block hero %}{% endblock %}
+  <main class="contenedor">
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="pie">Maitasunez eta oliba-olio askorekin egina 🫒</footer>
+  {% block scripts %}{% endblock %}
+</body>
+</html>
