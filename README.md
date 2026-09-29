@@ -14,6 +14,11 @@ cp .env.example .env        # ajustar contraseña de la BBDD y modelo de Ollama
 docker compose up -d --build
 ```
 
+La contraseña puede llevar cualquier carácter; si contiene `$`, ponla entre comillas simples en el `.env`
+(`POSTGRES_PASSWORD='abc$123'`) para que Compose no intente interpretarla como variable.
+La contraseña se fija al crear el volumen: si la cambias después, hay que cambiarla también en Postgres
+o recrear la BBDD con `docker compose down -v` (borra los datos).
+
 **Dev** (red con proxy): en el `.env` añade
 
 ```env

@@ -13,7 +13,9 @@ from starlette.concurrency import run_in_threadpool
 
 import ia
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://recetas:recetas@localhost:5432/recetas")
+# Sin DATABASE_URL, libpq usa las variables PGHOST, PGUSER, PGPASSWORD, PGDATABASE, PGPORT
+# (así la contraseña puede llevar cualquier carácter sin romper una URL).
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
 MAX_IMAGEN_BYTES = 5 * 1024 * 1024
 
 pool = ConnectionPool(DATABASE_URL, open=False, kwargs={"row_factory": dict_row})

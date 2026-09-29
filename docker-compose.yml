@@ -24,7 +24,11 @@ services:
       db:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-recetas}:${POSTGRES_PASSWORD:-recetas}@db:5432/${POSTGRES_DB:-recetas}
+      PGHOST: db
+      PGPORT: "5432"
+      PGDATABASE: ${POSTGRES_DB:-recetas}
+      PGUSER: ${POSTGRES_USER:-recetas}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-recetas}
       # IA para "Testutik sortu": ollama (producción, por defecto) o anthropic (dev). Ver .env.example.
       LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
