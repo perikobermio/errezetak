@@ -6,9 +6,14 @@ Proveedor según LLM_PROVIDER:
 Los dos devuelven el mismo dict, validado por normalizar().
 """
 import json
+import logging
 import os
+import re
+import unicodedata
 
 import httpx
+
+log = logging.getLogger("uvicorn.error")
 
 PROVIDER = os.environ.get("LLM_PROVIDER", "anthropic").strip().lower()
 ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-opus-5-5")
@@ -83,7 +88,13 @@ def extraer_receta(texto: str) -> dict:
         datos = _ollama(texto)
     else:
         raise ErrorIA(f"LLM_PROVIDER ezezaguna: {PROVIDER!r} (anthropic edo ollama).")
-    return normalizar(datos)
+    try:
+        return normalizar(datos)
+    except ErrorIA:
+        # La respuesta cruda en los logs (docker compose logs web) ayuda a ver qué devolvió el modelo.
+        log.warning("Respuesta del modelo no reconocida como receta: %s",
+                    json.dumps(datos, ensure_ascii=False)[:3000])
+        raise
 
 
 def _anthropic(texto):
@@ -121,7 +132,11 @@ def _ollama(texto):
                 "options": {"temperature": 0},
                 "messages": [
                     {"role": "system", "content": INSTRUCCIONES},
-                    {"role": "user", "content": f"<texto>\n{texto}\n</texto>\n\nDevuelve solo el JSON."},
+                    # El esquema también en el prompt: no todos los modelos (p. ej. los cloud) aplican `format`.
+                    {"role": "user", "content": f"<texto>\n{texto}\n</texto>\n\n"
+                                                "Devuelve solo un objeto JSON que cumpla este esquema, "
+                                                "con estas claves exactas:\n"
+                                                + json.dumps(ESQUEMA, ensure_ascii=False)},
                 ],
             })
             if r.status_code == 404:
@@ -133,9 +148,33 @@ def _ollama(texto):
     except httpx.HTTPError as e:
         raise ErrorIA(f"Ezin izan da Ollama-rekin konektatu ({OLLAMA_URL}): {e}") from e
     try:
-        return json.loads(r.json()["message"]["content"])
+        mensaje = r.json()["message"]
     except (KeyError, ValueError) as e:
-        raise ErrorIA("Ollama-k ez du JSON baliozkorik itzuli.") from e
+        raise ErrorIA("Ollama-k ez du erantzun baliozkorik itzuli.") from e
+    # Algunos modelos de razonamiento dejan la respuesta en `thinking` si `content` viene vacío.
+    for contenido in (mensaje.get("content"), mensaje.get("thinking")):
+        datos = _json_de_texto(contenido)
+        if datos is not None:
+            return datos
+    log.warning("Respuesta de Ollama sin JSON: %s", json.dumps(mensaje, ensure_ascii=False)[:3000])
+    raise ErrorIA("Ollama-k ez du JSON baliozkorik itzuli.")
+
+
+def _json_de_texto(contenido):
+    """JSON de la respuesta, tolerando bloques ```json``` o texto alrededor."""
+    if not isinstance(contenido, str) or not contenido.strip():
+        return None
+    try:
+        return json.loads(contenido)
+    except ValueError:
+        pass
+    inicio, fin = contenido.find("{"), contenido.rfind("}")
+    if inicio != -1 and fin > inicio:
+        try:
+            return json.loads(contenido[inicio:fin + 1])
+        except ValueError:
+            pass
+    return None
 
 
 def _modelos_ollama(cliente):
@@ -152,8 +191,57 @@ def _mensaje_error(r):
         return r.text[:300]
 
 
+# Nombres alternativos que usan algunos modelos cuando no respetan el esquema.
+ALIAS = {
+    "titulo": ("titulo", "title", "nombre", "name", "recipe_name", "nombre_receta", "izenburua"),
+    "descripcion": ("descripcion", "description", "resumen", "summary", "deskribapena"),
+    "raciones": ("raciones", "servings", "porciones", "personas", "comensales", "yield", "rendimiento", "anoak"),
+    "tags": ("tags", "etiquetas", "categorias", "categories", "keywords", "etiketak"),
+    "ingredientes": ("ingredientes", "ingredients", "osagaiak"),
+    "pasos": ("pasos", "steps", "instrucciones", "instructions", "preparacion", "pasos_preparacion",
+              "elaboracion", "method", "directions", "prestaketa", "urratsak"),
+    "tiempos": ("tiempos", "times", "tiempos_coccion", "timings", "tiempo", "denborak"),
+}
+CLAVES_INGREDIENTE = ("nombre", "name", "ingrediente", "ingredient", "item", "producto")
+CLAVES_CANTIDAD = ("cantidad", "quantity", "amount", "qty", "medida", "kantitatea")
+CLAVES_PASO = ("texto", "text", "descripcion", "description", "paso", "step", "instruccion", "instruction")
+CLAVES_FASE = ("fase", "phase", "etapa", "nombre", "name", "tipo", "type", "descripcion", "label")
+CLAVES_MINUTOS = ("minutos", "minutes", "duracion", "duration", "tiempo", "time", "min")
+
+
+def _clave(k):
+    k = unicodedata.normalize("NFKD", str(k)).encode("ascii", "ignore").decode().lower()
+    return re.sub(r"[^a-z0-9]+", "_", k).strip("_")
+
+
+def _campo(d, alias):
+    if not isinstance(d, dict):
+        return None
+    claves = {_clave(k): v for k, v in d.items()}
+    for a in alias:
+        if a in claves:
+            return claves[a]
+    return None
+
+
+def _desenvolver(d):
+    """Acepta {"receta": {...}}, [{...}] y similares."""
+    for _ in range(3):
+        if isinstance(d, list) and len(d) == 1:
+            d = d[0]
+        elif isinstance(d, dict) and not any(_campo(d, al) is not None for al in ALIAS.values()):
+            anidados = [v for v in d.values() if isinstance(v, (dict, list))]
+            if len(anidados) != 1:
+                break
+            d = anidados[0]
+        else:
+            break
+    return d
+
+
 def normalizar(d) -> dict:
     """Convierte la salida del modelo al formato del formulario, descartando basura."""
+    d = _desenvolver(d)
     if not isinstance(d, dict):
         raise ErrorIA("Ereduaren erantzunak ez du formatu egokia.")
 
@@ -161,30 +249,68 @@ def normalizar(d) -> dict:
         return v.strip() if isinstance(v, str) else ("" if v is None else str(v).strip())
 
     def entero(v):
-        try:
-            return int(float(v))
-        except (TypeError, ValueError):
-            return None
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            return int(v)
+        m = re.search(r"\d+", texto(v))  # "6 tortitas", "30 min"
+        return int(m.group()) if m else None
 
-    raciones = entero(d.get("raciones"))
+    def lista(v):
+        if isinstance(v, list):
+            return v
+        if isinstance(v, str):
+            return [x for x in re.split(r"\n+", v) if x.strip()]
+        return []
+
+    raciones = entero(_campo(d, ALIAS["raciones"]))
+
     tags = []
-    for t in d.get("tags") or []:
+    valor_tags = _campo(d, ALIAS["tags"])
+    for t in (valor_tags.split(",") if isinstance(valor_tags, str) else lista(valor_tags)):
         t = texto(t).lstrip("#").lower()
         if t and t not in tags:
             tags.append(t[:50])
-    ingredientes = [
-        {"nombre": texto(i.get("nombre"))[:200], "cantidad": texto(i.get("cantidad"))[:100]}
-        for i in d.get("ingredientes") or [] if isinstance(i, dict) and texto(i.get("nombre"))
-    ]
-    pasos = [texto(p) for p in d.get("pasos") or [] if texto(p)]
+
+    ingredientes = []
+
+    def anadir_ingrediente(i):
+        if isinstance(i, str):
+            nombre, cantidad = i, ""
+        elif isinstance(i, dict):
+            grupo = _campo(i, ALIAS["ingredientes"])
+            if isinstance(grupo, list):  # {"grupo": "Para acompañar", "ingredientes": [...]}
+                for sub in grupo:
+                    anadir_ingrediente(sub)
+                return
+            nombre, cantidad = _campo(i, CLAVES_INGREDIENTE), _campo(i, CLAVES_CANTIDAD)
+            unidad = _campo(i, ("unidad", "unit"))
+            if unidad and cantidad is not None:
+                cantidad = f"{texto(cantidad)} {texto(unidad)}"
+        else:
+            return
+        nombre = texto(nombre).lstrip("-•* ").strip()
+        if nombre:
+            ingredientes.append({"nombre": nombre[:200], "cantidad": texto(cantidad)[:100]})
+
+    for i in lista(_campo(d, ALIAS["ingredientes"])):
+        anadir_ingrediente(i)
+
+    pasos = []
+    for p in lista(_campo(d, ALIAS["pasos"])):
+        p = _campo(p, CLAVES_PASO) if isinstance(p, dict) else p
+        p = re.sub(r"^\s*(\d+[.)-]|[-•*])\s*", "", texto(p))
+        if p:
+            pasos.append(p)
+
     tiempos = []
-    for t in d.get("tiempos") or []:
-        if isinstance(t, dict) and texto(t.get("fase")) and (m := entero(t.get("minutos"))) is not None and m >= 0:
-            tiempos.append({"fase": texto(t["fase"])[:100], "minutos": m})
+    for t in lista(_campo(d, ALIAS["tiempos"])):
+        if isinstance(t, dict):
+            fase, m = texto(_campo(t, CLAVES_FASE)), entero(_campo(t, CLAVES_MINUTOS))
+            if fase and m is not None and m >= 0:
+                tiempos.append({"fase": fase[:100], "minutos": m})
 
     receta = {
-        "titulo": texto(d.get("titulo"))[:200],
-        "descripcion": texto(d.get("descripcion")),
+        "titulo": texto(_campo(d, ALIAS["titulo"]))[:200],
+        "descripcion": texto(_campo(d, ALIAS["descripcion"])),
         "raciones": raciones if raciones and raciones > 0 else None,
         "tags": tags,
         "ingredientes": ingredientes,
