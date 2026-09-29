@@ -11,6 +11,8 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./db/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ./app/migraciones.sql:/docker-entrypoint-initdb.d/02-migraciones.sql:ro
+      - ./db/ejemplos_extra.sql:/docker-entrypoint-initdb.d/03-ejemplos_extra.sql:ro
     ports:
       # Solo accesible desde la propia máquina; la web (red del host) se conecta por aquí.
       - "127.0.0.1:${POSTGRES_HOST_PORT:-5433}:5432"

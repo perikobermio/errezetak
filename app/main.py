@@ -12,18 +12,24 @@ from psycopg_pool import ConnectionPool
 from starlette.concurrency import run_in_threadpool
 
 import ia
+import imagenes
 
 # Sin DATABASE_URL, libpq usa las variables PGHOST, PGUSER, PGPASSWORD, PGDATABASE, PGPORT
 # (así la contraseña puede llevar cualquier carácter sin romper una URL).
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
-MAX_IMAGEN_BYTES = 5 * 1024 * 1024
+TAGS_DESTACADOS = 5
 
 pool = ConnectionPool(DATABASE_URL, open=False, kwargs={"row_factory": dict_row})
+
+
+MIGRACIONES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "migraciones.sql")
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     pool.open(wait=True)
+    with pool.connection() as conn, open(MIGRACIONES, encoding="utf-8") as f:
+        conn.execute(f.read())
     yield
     pool.close()
 
@@ -51,7 +57,7 @@ def normalizar_tags(tags):
 def listar_recetas(tags):
     """Recetas que tienen TODOS los tags indicados (sin tags: todas)."""
     sql = """
-        SELECT r.id, r.titulo, r.descripcion, r.raciones,
+        SELECT r.id, r.titulo, r.descripcion, r.raciones, r.personas,
                COALESCE((SELECT sum(minutos) FROM tiempos_coccion WHERE receta_id = r.id), 0) AS minutos_totales,
                EXISTS (SELECT 1 FROM imagenes WHERE receta_id = r.id) AS tiene_imagen,
                ARRAY(SELECT t.nombre FROM receta_tags rt JOIN tags t ON t.id = rt.tag_id
@@ -79,10 +85,33 @@ def listar_tags():
         """).fetchall()
 
 
+def listar_aparatos():
+    """Catálogo de aparatos: [{codigo, nombre, icono}] en orden."""
+    with pool.connection() as conn:
+        return conn.execute("SELECT codigo, nombre, icono FROM aparatos ORDER BY orden, nombre").fetchall()
+
+
+def recetas_parecidas(receta_id, limite=3):
+    """Recetas que comparten tags con la dada, las de más tags en común primero."""
+    with pool.connection() as conn:
+        return conn.execute("""
+            SELECT r.id, r.titulo, r.descripcion, r.raciones, r.personas,
+                   COALESCE((SELECT sum(minutos) FROM tiempos_coccion WHERE receta_id = r.id), 0) AS minutos_totales,
+                   ARRAY(SELECT t.nombre FROM receta_tags rt2 JOIN tags t ON t.id = rt2.tag_id
+                         WHERE rt2.receta_id = r.id ORDER BY t.nombre) AS tags,
+                   count(*) AS comunes
+            FROM receta_tags rt JOIN recetas r ON r.id = rt.receta_id
+            WHERE rt.tag_id IN (SELECT tag_id FROM receta_tags WHERE receta_id = %s) AND r.id <> %s
+            GROUP BY r.id
+            ORDER BY comunes DESC, r.creada_en DESC, r.id DESC
+            LIMIT %s
+        """, [receta_id, receta_id, limite]).fetchall()
+
+
 def obtener_receta(receta_id):
     with pool.connection() as conn:
         receta = conn.execute(
-            """SELECT id, titulo, descripcion, raciones, creada_en,
+            """SELECT id, titulo, descripcion, raciones, personas, creada_en,
                       EXISTS (SELECT 1 FROM imagenes WHERE receta_id = recetas.id) AS tiene_imagen
                FROM recetas WHERE id = %s""",
             [receta_id],
@@ -99,6 +128,11 @@ def obtener_receta(receta_id):
         receta["tiempos"] = conn.execute(
             "SELECT fase, minutos FROM tiempos_coccion WHERE receta_id = %s ORDER BY orden", [receta_id]).fetchall()
         receta["minutos_totales"] = sum(t["minutos"] for t in receta["tiempos"])
+        receta["consejos"] = [r["texto"] for r in conn.execute(
+            "SELECT texto FROM consejos WHERE receta_id = %s ORDER BY orden", [receta_id])]
+        receta["aparatos"] = [r["codigo"] for r in conn.execute(
+            """SELECT a.codigo FROM receta_aparatos ra JOIN aparatos a ON a.id = ra.aparato_id
+               WHERE ra.receta_id = %s ORDER BY a.orden""", [receta_id])]
         return receta
 
 
@@ -107,17 +141,19 @@ def guardar_receta(datos, receta_id=None):
     with pool.connection() as conn, conn.transaction():
         if receta_id is None:
             receta_id = conn.execute(
-                "INSERT INTO recetas (titulo, descripcion, raciones) VALUES (%s, %s, %s) RETURNING id",
-                [datos["titulo"], datos["descripcion"], datos["raciones"]],
+                """INSERT INTO recetas (titulo, descripcion, raciones, personas)
+                   VALUES (%s, %s, %s, %s) RETURNING id""",
+                [datos["titulo"], datos["descripcion"], datos["raciones"], datos["personas"]],
             ).fetchone()["id"]
         else:
             cur = conn.execute(
-                "UPDATE recetas SET titulo = %s, descripcion = %s, raciones = %s WHERE id = %s",
-                [datos["titulo"], datos["descripcion"], datos["raciones"], receta_id],
+                "UPDATE recetas SET titulo = %s, descripcion = %s, raciones = %s, personas = %s WHERE id = %s",
+                [datos["titulo"], datos["descripcion"], datos["raciones"], datos["personas"], receta_id],
             )
             if cur.rowcount == 0:
                 return None
-            for tabla in ("receta_tags", "ingredientes", "pasos_preparacion", "tiempos_coccion"):
+            for tabla in ("receta_tags", "ingredientes", "pasos_preparacion", "tiempos_coccion",
+                          "consejos", "receta_aparatos"):
                 conn.execute(f"DELETE FROM {tabla} WHERE receta_id = %s", [receta_id])
 
         for nombre in datos["tags"]:
@@ -140,14 +176,24 @@ def guardar_receta(datos, receta_id=None):
             conn.execute(
                 "INSERT INTO tiempos_coccion (receta_id, orden, fase, minutos) VALUES (%s, %s, %s, %s)",
                 [receta_id, i, fase, minutos])
+        for i, texto in enumerate(datos["consejos"], 1):
+            conn.execute(
+                "INSERT INTO consejos (receta_id, orden, texto) VALUES (%s, %s, %s)",
+                [receta_id, i, texto])
+        if datos["aparatos"]:
+            conn.execute(
+                """INSERT INTO receta_aparatos (receta_id, aparato_id)
+                   SELECT %s, id FROM aparatos WHERE codigo = ANY(%s)""",
+                [receta_id, datos["aparatos"]])
 
         if datos["imagen"]:
-            nombre, mime, contenido = datos["imagen"]
+            nombre, mime, contenido, url_origen = datos["imagen"]
             conn.execute(
-                """INSERT INTO imagenes (receta_id, nombre, mime, datos) VALUES (%s, %s, %s, %s)
+                """INSERT INTO imagenes (receta_id, nombre, mime, datos, url_origen) VALUES (%s, %s, %s, %s, %s)
                    ON CONFLICT (receta_id) DO UPDATE
-                   SET nombre = EXCLUDED.nombre, mime = EXCLUDED.mime, datos = EXCLUDED.datos""",
-                [receta_id, nombre, mime, contenido])
+                   SET nombre = EXCLUDED.nombre, mime = EXCLUDED.mime, datos = EXCLUDED.datos,
+                       url_origen = EXCLUDED.url_origen""",
+                [receta_id, nombre, mime, contenido, url_origen])
         elif datos["quitar_imagen"]:
             conn.execute("DELETE FROM imagenes WHERE receta_id = %s", [receta_id])
 
@@ -179,14 +225,21 @@ async def leer_formulario(request: Request):
     if not titulo:
         errores.append("Izenburua derrigorrezkoa da.")
 
-    raciones = None
-    if (form.get("raciones") or "").strip():
+    def entero_positivo(campo, error):
+        valor = (form.get(campo) or "").strip()
+        if not valor:
+            return None
         try:
-            raciones = int(form["raciones"])
-            if raciones <= 0:
+            n = int(valor)
+            if n <= 0:
                 raise ValueError
+            return n
         except ValueError:
-            errores.append("Anoen kopuruak zenbaki oso positiboa izan behar du.")
+            errores.append(error)
+            return None
+
+    raciones = entero_positivo("raciones", "Anoen kopuruak zenbaki oso positiboa izan behar du.")
+    personas = entero_positivo("personas", "Pertsona kopuruak zenbaki oso positiboa izan behar du.")
 
     ingredientes = [
         (n.strip(), c.strip())
@@ -194,6 +247,8 @@ async def leer_formulario(request: Request):
         if n.strip()
     ]
     pasos = [p.strip() for p in form.getlist("paso") if p.strip()]
+    consejos = [c.strip() for c in form.getlist("consejo") if c.strip()]
+    aparatos = list(dict.fromkeys(a for a in form.getlist("aparato") if a))
 
     tiempos = []
     for fase, minutos in zip(form.getlist("tiempo_fase"), form.getlist("tiempo_minutos")):
@@ -207,32 +262,39 @@ async def leer_formulario(request: Request):
         except ValueError:
             errores.append(f"Denbora ez da baliozkoa: «{fase} {minutos}». Adierazi fasea eta minutuak (zenbaki osoa, ≥ 0).")
 
+    # Imagen: el archivo subido tiene prioridad; si no hay, se descarga de la URL.
     imagen = None
     archivo = form.get("imagen")
-    if archivo is not None and getattr(archivo, "filename", ""):
-        contenido = await archivo.read()
-        mime = archivo.content_type or ""
-        if not mime.startswith("image/"):
-            errores.append("Igotako fitxategia ez da irudi bat.")
-        elif len(contenido) > MAX_IMAGEN_BYTES:
-            errores.append("Irudiak ezin ditu 5 MB gainditu.")
-        elif contenido:
-            imagen = (archivo.filename, mime, contenido)
+    imagen_url = (form.get("imagen_url") or "").strip()
+    try:
+        if archivo is not None and getattr(archivo, "filename", ""):
+            contenido = await archivo.read(imagenes.MAX_BYTES + 1)
+            if contenido:
+                imagen = (archivo.filename[:255], imagenes.validar(contenido), contenido, None)
+        elif imagen_url:
+            imagen = (*await imagenes.descargar(imagen_url), imagen_url)
+    except imagenes.ErrorImagen as e:
+        errores.append(str(e))
 
     datos = {
         "titulo": titulo,
         "descripcion": (form.get("descripcion") or "").strip(),
         "raciones": raciones,
+        "personas": personas,
         "tags": normalizar_tags((form.get("tags") or "").split(",")),
         "ingredientes": ingredientes,
         "pasos": pasos,
         "tiempos": tiempos,
+        "consejos": consejos,
+        "aparatos": aparatos,
         "imagen": imagen,
         "quitar_imagen": form.get("quitar_imagen") == "1",
     }
     valores = {
         **datos,
         "raciones": form.get("raciones") or "",
+        "personas": form.get("personas") or "",
+        "imagen_url": imagen_url,
         "ingredientes": [{"nombre": n, "cantidad": c} for n, c in ingredientes],
         "tiempos": [{"fase": f, "minutos": m} for f, m in tiempos],
     }
@@ -242,7 +304,8 @@ async def leer_formulario(request: Request):
 def pintar_formulario(request, receta, errores=None, status_code=200, desde_ia=False):
     return templates.TemplateResponse(
         request, "formulario.html",
-        {"receta": receta, "errores": errores or [], "desde_ia": desde_ia}, status_code=status_code)
+        {"receta": receta, "errores": errores or [], "desde_ia": desde_ia, "aparatos": listar_aparatos()},
+        status_code=status_code)
 
 
 # ---------------------------------------------------------------
@@ -252,9 +315,15 @@ def pintar_formulario(request, receta, errores=None, status_code=200, desde_ia=F
 @app.get("/", response_class=HTMLResponse)
 def inicio(request: Request, tag: list[str] = Query(default=[])):
     seleccion = normalizar_tags(tag)
+    tags = listar_tags()
+    # Se muestran los tags con más recetas y, además, los seleccionados; el resto, en el buscador.
+    destacados = sorted(tags, key=lambda t: (-t["total"], t["nombre"]))[:TAGS_DESTACADOS]
+    destacados += [t for t in tags if t["nombre"] in seleccion and t not in destacados]
+    destacados += [{"nombre": s, "total": 0} for s in seleccion if s not in {t["nombre"] for t in tags}]
     return templates.TemplateResponse(request, "index.html", {
         "recetas": listar_recetas(seleccion),
-        "tags": listar_tags(),
+        "tags": tags,
+        "destacados": destacados,
         "seleccion": seleccion,
     })
 
@@ -301,7 +370,11 @@ def detalle(request: Request, receta_id: int):
     receta = obtener_receta(receta_id)
     if not receta:
         raise HTTPException(404, "Ez da errezeta aurkitu")
-    return templates.TemplateResponse(request, "detalle.html", {"receta": receta})
+    return templates.TemplateResponse(request, "detalle.html", {
+        "receta": receta,
+        "aparatos": {a["codigo"]: a for a in listar_aparatos()},
+        "parecidas": recetas_parecidas(receta_id),
+    })
 
 
 @app.get("/recetas/{receta_id}/editar", response_class=HTMLResponse)

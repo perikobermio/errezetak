@@ -71,12 +71,30 @@ Cada parte de una receta es una tabla independiente:
 
 | Tabla               | Contenido                                        |
 |---------------------|--------------------------------------------------|
-| `recetas`           | título, descripción, raciones                    |
+| `recetas`           | título, descripción, raciones, personas          |
 | `tags` / `receta_tags` | tags únicos y relación N:M con recetas        |
-| `imagenes`          | una imagen por receta (binario en `BYTEA`)       |
+| `imagenes`          | una imagen por receta (binario en `BYTEA`) y la URL de origen si se descargó |
 | `ingredientes`      | nombre, cantidad y orden                         |
 | `pasos_preparacion` | texto de cada paso y orden                       |
 | `tiempos_coccion`   | fase (preparación, horno, reposo…) y minutos     |
+| `consejos`          | tips de la receta, con orden                     |
+| `aparatos` / `receta_aparatos` | catálogo (airfryer, horno, microondas, sartén) y los que usa cada receta |
+
+Los campos opcionales (personas, raciones, tiempos, consejos, aparatos) solo se muestran si están rellenos.
+Debajo de cada receta aparecen hasta 3 **recetas parecidas**: las que comparten más tags.
+
+**Imágenes:** se pueden subir como archivo o indicar una URL; en ese caso el servidor descarga la imagen
+y la guarda en la BBDD (no se enlaza). Por seguridad solo se descargan URLs `http(s)` que apunten a IPs
+públicas, también tras las redirecciones, así nadie puede usar la web para llegar a servicios internos
+como Ollama o Postgres. Máximo 5 MB, y el formato se comprueba por el contenido: JPEG, PNG, GIF, WebP o AVIF.
+No se admite SVG, porque puede contener scripts.
+
+**Tags en la portada:** se muestran los 5 con más recetas, más los que estén seleccionados; el resto se buscan
+con el campo "Bilatu etiketa gehiago…", que autocompleta.
+
+**Migraciones:** `app/migraciones.sql` es idempotente y la app lo ejecuta en cada arranque, así que una BBDD
+ya existente recibe las tablas y columnas nuevas sin perder datos. En una BBDD nueva, Postgres ejecuta
+`db/init.sql`, `app/migraciones.sql` y `db/ejemplos_extra.sql`, en ese orden.
 
 ## Rutas
 

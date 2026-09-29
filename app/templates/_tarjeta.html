@@ -1,0 +1,21 @@
+{% macro tarjeta(r) %}
+<a class="tarjeta" href="/recetas/{{ r.id }}">
+  <div class="foto">
+    <img src="/recetas/{{ r.id }}/imagen" alt="{{ r.titulo }}" loading="lazy">
+    {% if r.minutos_totales %}<span class="badge">⏱ {{ r.minutos_totales }} min</span>{% endif %}
+  </div>
+  <div class="cuerpo">
+    <h3>{{ r.titulo }}</h3>
+    <p>{{ r.descripcion | truncate(110) }}</p>
+    <div class="tags pequenos">
+      {% for t in r.tags %}<span class="tag c{{ t | color_tag }}">{{ t }}</span>{% endfor %}
+    </div>
+    {% if r.personas or r.raciones %}
+    <div class="meta">
+      {% if r.personas %}<span>👥 {{ r.personas }} lagunentzat</span>{% endif %}
+      {% if r.raciones %}<span>🍽 {{ r.raciones }} anoa</span>{% endif %}
+    </div>
+    {% endif %}
+  </div>
+</a>
+{% endmacro %}

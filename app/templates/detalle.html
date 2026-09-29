@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_tarjeta.html" import tarjeta %}
 {% block title %}{{ receta.titulo }} · Errezetak{% endblock %}
 {% block content %}
 <article class="receta">
@@ -18,8 +19,12 @@
     {% if receta.descripcion %}<p class="descripcion">{{ receta.descripcion }}</p>{% endif %}
     <div class="chips">
       {% if receta.minutos_totales %}<span class="chip naranja">⏱ {{ receta.minutos_totales }} min</span>{% endif %}
+      {% if receta.personas %}<span class="chip azul">👥 {{ receta.personas }} lagunentzat</span>{% endif %}
       {% if receta.raciones %}<span class="chip verde">🍽 {{ receta.raciones }} anoa</span>{% endif %}
       <span class="chip amarillo">🥕 {{ receta.ingredientes | length }} osagai</span>
+      {% for codigo in receta.aparatos if codigo in aparatos %}
+        <span class="chip morado">{{ aparatos[codigo].icono }} {{ aparatos[codigo].nombre }}</span>
+      {% endfor %}
     </div>
     <div class="tags">
       {% for t in receta.tags %}<a class="tag c{{ t | color_tag }}" href="/?tag={{ t | urlencode }}">{{ t }}</a>{% endfor %}
@@ -49,12 +54,31 @@
         </ul>
       </section>
     </div>
-    <section class="panel">
-      <h2>👩‍🍳 Prestaketa</h2>
-      <ol class="pasos">
-        {% for p in receta.pasos %}<li>{{ p }}</li>{% else %}<li class="vacio">Urratsik ez.</li>{% endfor %}
-      </ol>
-    </section>
+    <div>
+      <section class="panel">
+        <h2>👩‍🍳 Prestaketa</h2>
+        <ol class="pasos">
+          {% for p in receta.pasos %}<li>{{ p }}</li>{% else %}<li class="vacio">Urratsik ez.</li>{% endfor %}
+        </ol>
+      </section>
+      {% if receta.consejos %}
+      <section class="panel aholkuak">
+        <h2>💡 Aholkuak</h2>
+        <ul>
+          {% for c in receta.consejos %}<li>{{ c }}</li>{% endfor %}
+        </ul>
+      </section>
+      {% endif %}
+    </div>
   </div>
 </article>
+
+{% if parecidas %}
+<section class="parecidas">
+  <h2>Antzeko errezetak</h2>
+  <div class="rejilla">
+    {% for r in parecidas %}{{ tarjeta(r) }}{% endfor %}
+  </div>
+</section>
+{% endif %}
 {% endblock %}

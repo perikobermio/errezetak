@@ -27,12 +27,15 @@ class ErrorIA(Exception):
     """Fallo al extraer la receta; el mensaje se muestra al usuario."""
 
 
+APARATOS = ["airfryer", "horno", "microondas", "sarten"]
+
 ESQUEMA = {
     "type": "object",
     "properties": {
         "titulo": {"type": "string", "description": "Nombre de la receta"},
         "descripcion": {"type": "string", "description": "Resumen breve (1-2 frases). Vacío si el texto no lo da."},
-        "raciones": {"type": "integer", "description": "Número de raciones/personas; 0 si no se indica"},
+        "raciones": {"type": "integer", "description": "Número de raciones o unidades (p. ej. 6 tortitas); 0 si no se indica"},
+        "personas": {"type": "integer", "description": "Para cuántas personas es; 0 si no se indica"},
         "tags": {
             "type": "array", "items": {"type": "string"},
             "description": "3-6 etiquetas cortas en minúsculas: tipo de plato, ingrediente principal, técnica, dieta",
@@ -61,8 +64,13 @@ ESQUEMA = {
             },
             "description": "Tiempos por fase en minutos (convierte horas a minutos)",
         },
+        "consejos": {"type": "array", "items": {"type": "string"},
+                     "description": "Tips, trucos, sustituciones o notas del texto; lista vacía si no hay"},
+        "aparatos": {"type": "array", "items": {"type": "string", "enum": APARATOS},
+                     "description": "Aparatos que se usan para cocinar; lista vacía si no se usa ninguno de estos"},
     },
-    "required": ["titulo", "descripcion", "raciones", "tags", "ingredientes", "pasos", "tiempos"],
+    "required": ["titulo", "descripcion", "raciones", "personas", "tags", "ingredientes", "pasos", "tiempos",
+                 "consejos", "aparatos"],
 }
 
 INSTRUCCIONES = """Extraes recetas de cocina de un texto libre y las devuelves estructuradas.
@@ -73,7 +81,12 @@ Reglas:
 - Divide la preparación en pasos claros, en orden, sin numerarlos.
 - Los tiempos van en minutos enteros por fase. Si el texto solo da un tiempo total, usa una única fase.
   Si no menciona tiempos, devuelve una lista vacía.
-- Las etiquetas van en minúsculas, cortas y sin '#'."""
+- Las etiquetas van en minúsculas, cortas y sin '#'.
+- "raciones" son las unidades o raciones que salen; "personas", para cuántas personas es. Si el texto
+  no lo dice, pon 0. No deduzcas uno del otro.
+- "consejos": los tips, trucos, sustituciones o notas que aparezcan (no los pasos de la preparación).
+- "aparatos": solo de esta lista y solo si el texto los usa: airfryer (freidora de aire), horno,
+  microondas, sarten."""
 
 
 def extraer_receta(texto: str) -> dict:
@@ -195,12 +208,22 @@ def _mensaje_error(r):
 ALIAS = {
     "titulo": ("titulo", "title", "nombre", "name", "recipe_name", "nombre_receta", "izenburua"),
     "descripcion": ("descripcion", "description", "resumen", "summary", "deskribapena"),
-    "raciones": ("raciones", "servings", "porciones", "personas", "comensales", "yield", "rendimiento", "anoak"),
+    "raciones": ("raciones", "servings", "porciones", "unidades", "yield", "rendimiento", "anoak"),
+    "personas": ("personas", "comensales", "people", "persons", "diners", "para_cuantas_personas", "pertsonak"),
+    "consejos": ("consejos", "tips", "trucos", "notas", "notes", "sugerencias", "consejo", "aholkuak"),
+    "aparatos": ("aparatos", "electrodomesticos", "appliances", "utensilios", "equipment", "equipo", "tresnak"),
     "tags": ("tags", "etiquetas", "categorias", "categories", "keywords", "etiketak"),
     "ingredientes": ("ingredientes", "ingredients", "osagaiak"),
     "pasos": ("pasos", "steps", "instrucciones", "instructions", "preparacion", "pasos_preparacion",
               "elaboracion", "method", "directions", "prestaketa", "urratsak"),
     "tiempos": ("tiempos", "times", "tiempos_coccion", "timings", "tiempo", "denborak"),
+}
+# Palabras que identifican cada aparato en la respuesta del modelo.
+PALABRAS_APARATO = {
+    "airfryer": ("airfryer", "air_fryer", "air fryer", "freidora de aire", "freidora", "aire-frijigailu"),
+    "horno": ("horno", "oven", "labe"),
+    "microondas": ("microondas", "microwave", "mikrouhin"),
+    "sarten": ("sarten", "pan", "skillet", "frying", "plancha", "zartagin"),
 }
 CLAVES_INGREDIENTE = ("nombre", "name", "ingrediente", "ingredient", "item", "producto")
 CLAVES_CANTIDAD = ("cantidad", "quantity", "amount", "qty", "medida", "kantitatea")
@@ -262,6 +285,7 @@ def normalizar(d) -> dict:
         return []
 
     raciones = entero(_campo(d, ALIAS["raciones"]))
+    personas = entero(_campo(d, ALIAS["personas"]))
 
     tags = []
     valor_tags = _campo(d, ALIAS["tags"])
@@ -308,14 +332,33 @@ def normalizar(d) -> dict:
             if fase and m is not None and m >= 0:
                 tiempos.append({"fase": fase[:100], "minutos": m})
 
+    consejos = []
+    for c in lista(_campo(d, ALIAS["consejos"])):
+        c = _campo(c, CLAVES_PASO) if isinstance(c, dict) else c
+        c = re.sub(r"^\s*[-•*]\s*", "", texto(c))
+        if c:
+            consejos.append(c)
+
+    aparatos = []
+    valor_aparatos = _campo(d, ALIAS["aparatos"])
+    for a in (valor_aparatos.split(",") if isinstance(valor_aparatos, str) else lista(valor_aparatos)):
+        a = unicodedata.normalize("NFKD", texto(a)).encode("ascii", "ignore").decode().lower()
+        for codigo, palabras in PALABRAS_APARATO.items():
+            if any(p in a for p in palabras) and codigo not in aparatos:
+                aparatos.append(codigo)
+                break
+
     receta = {
         "titulo": texto(_campo(d, ALIAS["titulo"]))[:200],
         "descripcion": texto(_campo(d, ALIAS["descripcion"])),
         "raciones": raciones if raciones and raciones > 0 else None,
+        "personas": personas if personas and personas > 0 else None,
         "tags": tags,
         "ingredientes": ingredientes,
         "pasos": pasos,
         "tiempos": tiempos,
+        "consejos": consejos,
+        "aparatos": aparatos,
     }
     if not receta["titulo"] and not ingredientes and not pasos:
         raise ErrorIA("Ez da errezetarik aurkitu testuan.")

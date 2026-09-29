@@ -21,6 +21,9 @@
     <textarea name="descripcion" rows="3">{{ receta.descripcion if receta else '' }}</textarea>
   </label>
   <div class="fila">
+    <label>Pertsonak
+      <input name="personas" type="number" min="1" value="{{ receta.personas if receta and receta.personas else '' }}">
+    </label>
     <label>Anoak
       <input name="raciones" type="number" min="1" value="{{ receta.raciones if receta and receta.raciones else '' }}">
     </label>
@@ -35,7 +38,29 @@
       <img class="miniatura" src="/recetas/{{ receta.id }}/imagen" alt="">
       <label class="check"><input type="checkbox" name="quitar_imagen" value="1"> Kendu uneko irudia</label>
     {% endif %}
-    <input type="file" name="imagen" accept="image/*">
+    <div class="imagen-opciones">
+      <label>Irudiaren URLa
+        <input name="imagen_url" type="url" placeholder="https://…/argazkia.jpg" value="{{ receta.imagen_url if receta and receta.imagen_url else '' }}">
+      </label>
+      <span class="edo">edo</span>
+      <label>Fitxategia igo
+        <input type="file" name="imagen" accept="image/jpeg,image/png,image/gif,image/webp,image/avif">
+      </label>
+    </div>
+    <small class="nota">Irudia deskargatu eta datu-basean gordeko da. Gehienez 5 MB.</small>
+  </fieldset>
+
+  <fieldset>
+    <legend>🍳 Tresnak</legend>
+    <div class="aparatos">
+      {% set elegidos = receta.aparatos if receta and receta.aparatos else [] %}
+      {% for a in aparatos %}
+      <label class="aparato">
+        <input type="checkbox" name="aparato" value="{{ a.codigo }}" {{ "checked" if a.codigo in elegidos }}>
+        <span>{{ a.icono }} {{ a.nombre }}</span>
+      </label>
+      {% endfor %}
+    </div>
   </fieldset>
 
   <fieldset>
@@ -77,6 +102,19 @@
       {% endfor %}
     </div>
     <button type="button" class="boton secundario" data-anadir="tiempos">+ Denbora</button>
+  </fieldset>
+
+  <fieldset>
+    <legend>💡 Aholkuak</legend>
+    <div class="lista" id="consejos">
+      {% for c in (receta.consejos if receta and receta.consejos else [""]) %}
+      <div class="item">
+        <textarea name="consejo" rows="2" placeholder="Trikimailua, ordezkoa, kontserbatzeko modua…">{{ c }}</textarea>
+        <button type="button" class="quitar" title="Kendu">✕</button>
+      </div>
+      {% endfor %}
+    </div>
+    <button type="button" class="boton secundario" data-anadir="consejos">+ Aholkua</button>
   </fieldset>
 
   <div class="acciones">
