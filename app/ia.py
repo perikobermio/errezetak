@@ -124,13 +124,32 @@ def _ollama(texto):
                     {"role": "user", "content": f"<texto>\n{texto}\n</texto>\n\nDevuelve solo el JSON."},
                 ],
             })
-            r.raise_for_status()
+            if r.status_code == 404:
+                # Ollama responde 404 cuando el modelo no está instalado.
+                raise ErrorIA(f"Ollama-k ez du '{OLLAMA_MODEL}' eredua. Jarri OLLAMA_MODEL-en instalatutako "
+                              f"eredu bat: {_modelos_ollama(cliente) or '(ez dago eredurik: ollama pull …)'}")
+            if r.status_code != 200:
+                raise ErrorIA(f"Ollama-ren errorea ({r.status_code}): {_mensaje_error(r)}")
     except httpx.HTTPError as e:
         raise ErrorIA(f"Ezin izan da Ollama-rekin konektatu ({OLLAMA_URL}): {e}") from e
     try:
         return json.loads(r.json()["message"]["content"])
     except (KeyError, ValueError) as e:
         raise ErrorIA("Ollama-k ez du JSON baliozkorik itzuli.") from e
+
+
+def _modelos_ollama(cliente):
+    try:
+        return ", ".join(m["name"] for m in cliente.get(f"{OLLAMA_URL}/api/tags").json()["models"])
+    except (httpx.HTTPError, KeyError, ValueError):
+        return ""
+
+
+def _mensaje_error(r):
+    try:
+        return r.json()["error"]
+    except (KeyError, ValueError):
+        return r.text[:300]
 
 
 def normalizar(d) -> dict:
