@@ -1,0 +1,16 @@
+# Ajustes solo para dev (red corporativa con proxy Zscaler, IA con Claude).
+# Uso: COMPOSE_FILE=docker-compose.yml:docker-compose.dev.yml en el .env de dev,
+# o: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+services:
+  web:
+    build:
+      args:
+        # Para que pip llegue a PyPI durante el build.
+        HTTP_PROXY: http://proxycloud.eitb.lan:80
+        HTTPS_PROXY: http://proxycloud.eitb.lan:80
+        NO_PROXY: localhost,127.0.0.1,db
+    environment:
+      LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
+      # Salida a la API de Claude por el proxy. Ollama y la BBDD no pasan por él.
+      HTTPS_PROXY: http://proxycloud.eitb.lan:80
+      NO_PROXY: db,localhost,127.0.0.1,host.docker.internal

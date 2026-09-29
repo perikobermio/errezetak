@@ -4,25 +4,34 @@ Web de recetas con FastAPI + PostgreSQL, levantada con Docker Compose en el puer
 
 ## Arranque
 
+`docker-compose.yml` es la configuración de **producción**: sin proxy y con la IA en Ollama.
+En **dev** se le suma `docker-compose.dev.yml`, que añade el proxy corporativo y usa Claude.
+
+**Producción:**
+
 ```bash
-cp .env.example .env        # opcional: credenciales de la BBDD
+cp .env.example .env        # ajustar contraseña de la BBDD y modelo de Ollama
 docker compose up -d --build
 ```
+
+**Dev** (red con proxy): en el `.env` añade
+
+```env
+COMPOSE_FILE=docker-compose.yml:docker-compose.dev.yml
+LLM_PROVIDER=anthropic
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+y lanza el mismo `docker compose up -d --build`. Sin tocar el `.env`, puedes usar
+`docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build`.
 
 Abrir http://localhost:8085
 
 El esquema y 4 recetas de ejemplo se cargan desde `db/init.sql` la primera vez que se crea el volumen.
 Para reiniciar la BBDD desde cero: `docker compose down -v && docker compose up -d`.
 
-El build usa por defecto el proxy `http://proxycloud.eitb.lan:80` para instalar las dependencias
-(ver `build.args` en `docker-compose.yml`). Fuera de la red corporativa:
-
-```bash
-HTTP_PROXY= HTTPS_PROXY= docker compose up -d --build
-```
-
-El proxy (Zscaler) intercepta el HTTPS, así que la imagen incluye su CA raíz desde `app/certs/`.
-Cualquier `*.crt` que se deje en esa carpeta se añade al almacén de certificados del contenedor.
+En dev el proxy (Zscaler) intercepta el HTTPS, así que la imagen incluye su CA raíz desde `app/certs/`
+(en producción no molesta). Cualquier `*.crt` que se deje en esa carpeta se añade al almacén de certificados del contenedor.
 
 ## Crear recetas desde texto (IA)
 
@@ -34,7 +43,7 @@ El proveedor se elige en `.env` (ver `.env.example`):
 
 | Entorno | `.env` |
 |---------|--------|
-| Dev: Claude | `LLM_PROVIDER=anthropic`, `ANTHROPIC_API_KEY=sk-ant-…`, `ANTHROPIC_MODEL=claude-opus-5-5` |
+| Dev: Claude | `COMPOSE_FILE=docker-compose.yml:docker-compose.dev.yml`, `LLM_PROVIDER=anthropic`, `ANTHROPIC_API_KEY=sk-ant-…`, `ANTHROPIC_MODEL=claude-opus-5-5` |
 | Producción: Ollama | `LLM_PROVIDER=ollama`, `OLLAMA_URL=http://host.docker.internal:11434`, `OLLAMA_MODEL=qwen2.5:7b` |
 
 Los dos usan salida estructurada con el mismo esquema JSON (Claude mediante *tool use* forzado, Ollama

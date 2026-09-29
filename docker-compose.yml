@@ -1,3 +1,5 @@
+# Configuración base = producción (sin proxy, IA con Ollama).
+# En dev se combina con docker-compose.dev.yml (ver README).
 services:
   db:
     image: postgres:16-alpine
@@ -16,30 +18,20 @@ services:
       retries: 10
 
   web:
-    build:
-      context: ./app
-      # Proxy corporativo para que pip llegue a PyPI durante el build.
-      # Sobrescribible con variables de entorno (vacías = sin proxy).
-      args:
-        HTTP_PROXY: ${HTTP_PROXY-http://proxycloud.eitb.lan:80}
-        HTTPS_PROXY: ${HTTPS_PROXY-http://proxycloud.eitb.lan:80}
-        NO_PROXY: ${NO_PROXY_BUILD-localhost,127.0.0.1,db}
+    build: ./app
     restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-recetas}:${POSTGRES_PASSWORD:-recetas}@db:5432/${POSTGRES_DB:-recetas}
-      # IA para "Testutik sortu": anthropic (dev) u ollama (producción). Ver .env.example.
-      LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
+      # IA para "Testutik sortu": ollama (producción, por defecto) o anthropic (dev). Ver .env.example.
+      LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-opus-5-5}
       OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b}
       LLM_TIMEOUT: ${LLM_TIMEOUT:-300}
-      # Salida a internet (API de Claude) por el proxy corporativo. Ollama no usa el proxy.
-      HTTPS_PROXY: ${HTTPS_PROXY-http://proxycloud.eitb.lan:80}
-      NO_PROXY: db,localhost,127.0.0.1,host.docker.internal
     extra_hosts:
       # Permite llegar a un Ollama que corre en la máquina anfitriona.
       - "host.docker.internal:host-gateway"
