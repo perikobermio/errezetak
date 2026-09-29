@@ -11,6 +11,9 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./db/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    ports:
+      # Solo accesible desde la propia máquina; la web (red del host) se conecta por aquí.
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5433}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
@@ -20,12 +23,16 @@ services:
   web:
     build: ./app
     restart: unless-stopped
+    # Red del host: la web llega a Ollama en 127.0.0.1:11434 (Ollama solo escucha en localhost)
+    # y publica directamente el puerto 8085.
+    network_mode: host
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8085"]
     depends_on:
       db:
         condition: service_healthy
     environment:
-      PGHOST: db
-      PGPORT: "5432"
+      PGHOST: 127.0.0.1
+      PGPORT: ${POSTGRES_HOST_PORT:-5433}
       PGDATABASE: ${POSTGRES_DB:-recetas}
       PGUSER: ${POSTGRES_USER:-recetas}
       PGPASSWORD: ${POSTGRES_PASSWORD:-recetas}
@@ -33,14 +40,9 @@ services:
       LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-opus-5-5}
-      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+      OLLAMA_URL: ${OLLAMA_URL:-http://127.0.0.1:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b}
       LLM_TIMEOUT: ${LLM_TIMEOUT:-300}
-    extra_hosts:
-      # Permite llegar a un Ollama que corre en la máquina anfitriona.
-      - "host.docker.internal:host-gateway"
-    ports:
-      - "8085:8000"
 
 volumes:
   pgdata:

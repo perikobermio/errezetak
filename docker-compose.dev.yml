@@ -13,4 +13,4 @@ services:
       LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
       # Salida a la API de Claude por el proxy. Ollama y la BBDD no pasan por él.
       HTTPS_PROXY: http://proxycloud.eitb.lan:80
-      NO_PROXY: db,localhost,127.0.0.1,host.docker.internal
+      NO_PROXY: localhost,127.0.0.1

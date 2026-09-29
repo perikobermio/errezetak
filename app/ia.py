@@ -12,7 +12,7 @@ import httpx
 
 PROVIDER = os.environ.get("LLM_PROVIDER", "anthropic").strip().lower()
 ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-opus-5-5")
-OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://host.docker.internal:11434").rstrip("/")
+OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:7b")
 TIMEOUT = float(os.environ.get("LLM_TIMEOUT", "300"))
 MAX_TEXTO = 20_000

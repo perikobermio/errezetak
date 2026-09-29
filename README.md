@@ -49,27 +49,21 @@ El proveedor se elige en `.env` (ver `.env.example`):
 | Entorno | `.env` |
 |---------|--------|
 | Dev: Claude | `COMPOSE_FILE=docker-compose.yml:docker-compose.dev.yml`, `LLM_PROVIDER=anthropic`, `ANTHROPIC_API_KEY=sk-ant-…`, `ANTHROPIC_MODEL=claude-opus-5-5` |
-| Producción: Ollama | `LLM_PROVIDER=ollama`, `OLLAMA_URL=http://host.docker.internal:11434`, `OLLAMA_MODEL=qwen2.5:7b` |
+| Producción: Ollama | `LLM_PROVIDER=ollama`, `OLLAMA_URL=http://127.0.0.1:11434`, `OLLAMA_MODEL=qwen2.5:7b` |
 
 Los dos usan salida estructurada con el mismo esquema JSON (Claude mediante *tool use* forzado, Ollama
 con `format`), y la respuesta se valida y limpia en `app/ia.py` antes de mostrarse.
 
-**Ollama en la misma máquina que Docker:** por defecto Ollama solo escucha en `127.0.0.1`, y el contenedor
-no le llega. Hazlo escuchar en todas las interfaces:
+**Ollama en el host:** el contenedor `web` usa la red del host (`network_mode: host`), así que llama a
+Ollama en `http://127.0.0.1:11434` sin tener que cambiar la configuración de Ollama (que por defecto solo
+escucha en localhost). Por eso mismo, Postgres se publica solo en `127.0.0.1:5433` (cambiable con
+`POSTGRES_HOST_PORT`) y la web se conecta por ahí. Para comprobar Ollama desde el contenedor:
 
 ```bash
-sudo systemctl edit ollama      # añadir:
-# [Service]
-# Environment="OLLAMA_HOST=0.0.0.0:11434"
-sudo systemctl restart ollama
+docker compose exec web python -c "import httpx; print(httpx.get('http://127.0.0.1:11434/api/tags', trust_env=False).text)"
 ```
 
-Si Ollama está en otra máquina, pon su dirección en `OLLAMA_URL`. Para comprobar la conexión desde el contenedor:
-
-
-```bash
-docker compose exec web python -c "import os, httpx; print(httpx.get(os.environ['OLLAMA_URL'] + '/api/tags', trust_env=False).text)"
-```
+Si Ollama está en otra máquina, pon su dirección en `OLLAMA_URL`.
 
 ## Modelo de datos
 
