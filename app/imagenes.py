@@ -3,7 +3,7 @@
 La imagen se identifica por su contenido (no por la extensión ni la cabecera) y
 solo se admiten formatos raster: un SVG podría llevar scripts.
 Las descargas por URL solo van a IPs públicas, para que el servidor no pueda
-usarse para llegar a servicios internos (Ollama, Postgres, la red corporativa…).
+usarse para llegar a servicios internos (Postgres, la red corporativa…).
 """
 import asyncio
 import ipaddress

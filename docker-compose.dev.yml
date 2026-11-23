@@ -11,6 +11,6 @@ services:
         NO_PROXY: localhost,127.0.0.1,db
     environment:
       LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
-      # Salida a la API de Claude por el proxy. Ollama y la BBDD no pasan por él.
+      # Salida a la API del proveedor de IA por el proxy. La BBDD no pasa por él.
       HTTPS_PROXY: http://proxycloud.eitb.lan:80
       NO_PROXY: localhost,127.0.0.1

@@ -2,7 +2,7 @@
 
 Proveedor según LLM_PROVIDER:
   - "anthropic": API de Claude (dev). Requiere ANTHROPIC_API_KEY.
-  - "ollama": servidor Ollama local (producción). Usa OLLAMA_URL y OLLAMA_MODEL.
+  - "opencode": API de OpenCode Go (producción). Usa OPENCODE_BASE_URL, OPENCODE_API_KEY y OPENCODE_MODEL.
 Los dos devuelven el mismo dict, validado por normalizar().
 """
 import json
@@ -15,10 +15,12 @@ import httpx
 
 log = logging.getLogger("uvicorn.error")
 
-PROVIDER = os.environ.get("LLM_PROVIDER", "anthropic").strip().lower()
+PROVIDER = os.environ.get("LLM_PROVIDER", "opencode").strip().lower()
 ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-opus-5-5")
-OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:7b")
+OPENCODE_BASE_URL = os.environ.get("OPENCODE_BASE_URL", "https://opencode.ai/inference/go/openai/v1").rstrip("/")
+OPENCODE_API_KEY = os.environ.get("OPENCODE_API_KEY", "").strip()
+OPENCODE_MODEL = os.environ.get("OPENCODE_MODEL", "deepseek-v4.1-flash")
+OPENCODE_SESSION = os.environ.get("OPENCODE_SESSION", "errezetak")
 TIMEOUT = float(os.environ.get("LLM_TIMEOUT", "300"))
 MAX_TEXTO = 20_000
 
@@ -97,10 +99,10 @@ def extraer_receta(texto: str) -> dict:
         raise ErrorIA(f"Testua luzeegia da ({MAX_TEXTO} karaktere gehienez).")
     if PROVIDER == "anthropic":
         datos = _anthropic(texto)
-    elif PROVIDER == "ollama":
-        datos = _ollama(texto)
+    elif PROVIDER == "opencode":
+        datos = _opencode(texto)
     else:
-        raise ErrorIA(f"LLM_PROVIDER ezezaguna: {PROVIDER!r} (anthropic edo ollama).")
+        raise ErrorIA(f"LLM_PROVIDER ezezaguna: {PROVIDER!r} (anthropic edo opencode).")
     try:
         return normalizar(datos)
     except ErrorIA:
@@ -134,43 +136,79 @@ def _anthropic(texto):
     raise ErrorIA("Claude-k ez du errezetarik itzuli.")
 
 
-def _ollama(texto):
-    # trust_env=False: Ollama está en la red interna, no debe pasar por el proxy corporativo.
+def _opencode(texto):
+    if not OPENCODE_API_KEY:
+        raise ErrorIA("OPENCODE_API_KEY ez dago konfiguratuta.")
+    cuerpo = {
+        "model": OPENCODE_MODEL,
+        # Los modelos de razonamiento gastan parte del presupuesto en razonar; deja margen para el JSON.
+        "max_tokens": 8192,
+        "reasoning_effort": "low",
+        "response_format": {"type": "json_schema",
+                            "json_schema": {"name": "receta", "strict": False, "schema": ESQUEMA}},
+        "messages": [
+            {"role": "system", "content": INSTRUCCIONES},
+            # El esquema también en el prompt: si el modelo no soporta `response_format`, sirve de guía.
+            {"role": "user", "content": f"<texto>\n{texto}\n</texto>\n\n"
+                                        "Devuelve solo un objeto JSON que cumpla este esquema, "
+                                        "con estas claves exactas:\n"
+                                        + json.dumps(ESQUEMA, ensure_ascii=False)},
+        ],
+    }
     try:
-        with httpx.Client(timeout=TIMEOUT, trust_env=False) as cliente:
-            r = cliente.post(f"{OLLAMA_URL}/api/chat", json={
-                "model": OLLAMA_MODEL,
-                "stream": False,
-                "format": ESQUEMA,
-                "options": {"temperature": 0},
-                "messages": [
-                    {"role": "system", "content": INSTRUCCIONES},
-                    # El esquema también en el prompt: no todos los modelos (p. ej. los cloud) aplican `format`.
-                    {"role": "user", "content": f"<texto>\n{texto}\n</texto>\n\n"
-                                                "Devuelve solo un objeto JSON que cumpla este esquema, "
-                                                "con estas claves exactas:\n"
-                                                + json.dumps(ESQUEMA, ensure_ascii=False)},
-                ],
-            })
+        with httpx.Client(timeout=TIMEOUT) as cliente:
+            r = _peticion_chat(cliente, cuerpo)
+            if r.status_code == 400:
+                # Algunos modelos no admiten estos parámetros: reintenta quitando el que rechacen.
+                bajo = r.text.lower()
+                quitado = False
+                for parametro in ("response_format", "reasoning_effort"):
+                    if parametro in bajo:
+                        cuerpo.pop(parametro, None)
+                        quitado = True
+                if quitado:
+                    r = _peticion_chat(cliente, cuerpo)
+            if r.status_code == 200 and _finish_reason(r) == "length":
+                # El razonamiento agotó los tokens y no dejó sitio al JSON: reintenta con más margen.
+                cuerpo["max_tokens"] *= 2
+                r = _peticion_chat(cliente, cuerpo)
+            if r.status_code == 401:
+                raise ErrorIA("OpenCode-ren API gakoak ez du balio (OPENCODE_API_KEY).")
+            if r.status_code == 403:
+                raise ErrorIA(f"OpenCode Go harpidetzarik ez dago gako honetarako: {_mensaje_error(r)}")
             if r.status_code == 404:
-                # Ollama responde 404 cuando el modelo no está instalado.
-                raise ErrorIA(f"Ollama-k ez du '{OLLAMA_MODEL}' eredua. Jarri OLLAMA_MODEL-en instalatutako "
-                              f"eredu bat: {_modelos_ollama(cliente) or '(ez dago eredurik: ollama pull …)'}")
+                raise ErrorIA(f"OpenCode-k ez du '{OPENCODE_MODEL}' eredua. Jarri OPENCODE_MODEL-en "
+                              f"erabilgarri dagoen eredu bat: {_modelos_opencode(cliente) or '(ikusi /models)'}")
             if r.status_code != 200:
-                raise ErrorIA(f"Ollama-ren errorea ({r.status_code}): {_mensaje_error(r)}")
+                raise ErrorIA(f"OpenCode-ren errorea ({r.status_code}): {_mensaje_error(r)}")
     except httpx.HTTPError as e:
-        raise ErrorIA(f"Ezin izan da Ollama-rekin konektatu ({OLLAMA_URL}): {e}") from e
+        raise ErrorIA(f"Ezin izan da OpenCode-ren APIarekin konektatu ({OPENCODE_BASE_URL}): {e}") from e
     try:
-        mensaje = r.json()["message"]
-    except (KeyError, ValueError) as e:
-        raise ErrorIA("Ollama-k ez du erantzun baliozkorik itzuli.") from e
-    # Algunos modelos de razonamiento dejan la respuesta en `thinking` si `content` viene vacío.
-    for contenido in (mensaje.get("content"), mensaje.get("thinking")):
+        mensaje = r.json()["choices"][0]["message"]
+    except (KeyError, IndexError, TypeError, ValueError) as e:
+        raise ErrorIA("OpenCode-k ez du erantzun baliozkorik itzuli.") from e
+    # Algunos modelos de razonamiento dejan la respuesta en `reasoning_content` si `content` viene vacío.
+    for contenido in (mensaje.get("content"), mensaje.get("reasoning_content")):
         datos = _json_de_texto(contenido)
         if datos is not None:
             return datos
-    log.warning("Respuesta de Ollama sin JSON: %s", json.dumps(mensaje, ensure_ascii=False)[:3000])
-    raise ErrorIA("Ollama-k ez du JSON baliozkorik itzuli.")
+    log.warning("Respuesta de OpenCode sin JSON: %s", json.dumps(mensaje, ensure_ascii=False)[:3000])
+    raise ErrorIA("OpenCode-k ez du JSON baliozkorik itzuli.")
+
+
+def _peticion_chat(cliente, cuerpo):
+    return cliente.post(f"{OPENCODE_BASE_URL}/chat/completions", json=cuerpo, headers={
+        "Authorization": f"Bearer {OPENCODE_API_KEY}",
+        "x-opencode-session": OPENCODE_SESSION,
+        "User-Agent": "errezetak/1.0",
+    })
+
+
+def _finish_reason(r):
+    try:
+        return r.json()["choices"][0].get("finish_reason")
+    except (KeyError, IndexError, TypeError, ValueError):
+        return None
 
 
 def _json_de_texto(contenido):
@@ -190,18 +228,23 @@ def _json_de_texto(contenido):
     return None
 
 
-def _modelos_ollama(cliente):
+def _modelos_opencode(cliente):
     try:
-        return ", ".join(m["name"] for m in cliente.get(f"{OLLAMA_URL}/api/tags").json()["models"])
-    except (httpx.HTTPError, KeyError, ValueError):
+        r = cliente.get(f"{OPENCODE_BASE_URL}/models", headers={
+            "Authorization": f"Bearer {OPENCODE_API_KEY}", "User-Agent": "errezetak/1.0"})
+        return ", ".join(m["id"] for m in r.json()["data"])
+    except (httpx.HTTPError, KeyError, TypeError, ValueError):
         return ""
 
 
 def _mensaje_error(r):
     try:
-        return r.json()["error"]
+        error = r.json()["error"]
     except (KeyError, ValueError):
         return r.text[:300]
+    if isinstance(error, dict):
+        return error.get("message") or json.dumps(error, ensure_ascii=False)
+    return str(error)
 
 
 # Nombres alternativos que usan algunos modelos cuando no respetan el esquema.
@@ -366,4 +409,5 @@ def normalizar(d) -> dict:
 
 
 def descripcion_proveedor() -> str:
-    return f"Claude ({ANTHROPIC_MODEL})" if PROVIDER == "anthropic" else f"Ollama ({OLLAMA_MODEL})"
+    return f"Claude ({ANTHROPIC_MODEL})" if PROVIDER == "anthropic" \
+        else f"OpenCode Go ({OPENCODE_MODEL})"

@@ -4,13 +4,13 @@ Web de recetas con FastAPI + PostgreSQL, levantada con Docker Compose en el puer
 
 ## Arranque
 
-`docker-compose.yml` es la configuración de **producción**: sin proxy y con la IA en Ollama.
+`docker-compose.yml` es la configuración de **producción**: sin proxy y con la IA en OpenCode Go.
 En **dev** se le suma `docker-compose.dev.yml`, que añade el proxy corporativo y usa Claude.
 
 **Producción:**
 
 ```bash
-cp .env.example .env        # ajustar contraseña de la BBDD y modelo de Ollama
+cp .env.example .env        # ajustar contraseña de la BBDD, clave y modelo de OpenCode
 docker compose up -d --build
 ```
 
@@ -49,21 +49,17 @@ El proveedor se elige en `.env` (ver `.env.example`):
 | Entorno | `.env` |
 |---------|--------|
 | Dev: Claude | `COMPOSE_FILE=docker-compose.yml:docker-compose.dev.yml`, `LLM_PROVIDER=anthropic`, `ANTHROPIC_API_KEY=sk-ant-…`, `ANTHROPIC_MODEL=claude-opus-5-5` |
-| Producción: Ollama | `LLM_PROVIDER=ollama`, `OLLAMA_URL=http://127.0.0.1:11434`, `OLLAMA_MODEL=qwen2.5:7b` |
+| Producción: OpenCode Go | `LLM_PROVIDER=opencode`, `OPENCODE_API_KEY=oc_sk_…`, `OPENCODE_MODEL=deepseek-v4.1-flash` |
 
-Los dos usan salida estructurada con el mismo esquema JSON (Claude mediante *tool use* forzado, Ollama
-con `format`), y la respuesta se valida y limpia en `app/ia.py` antes de mostrarse.
+Los dos usan salida estructurada con el mismo esquema JSON (Claude mediante *tool use* forzado, OpenCode
+con `response_format` y el esquema también en el prompt), y la respuesta se valida y limpia en `app/ia.py`
+antes de mostrarse.
 
-**Ollama en el host:** el contenedor `web` usa la red del host (`network_mode: host`), así que llama a
-Ollama en `http://127.0.0.1:11434` sin tener que cambiar la configuración de Ollama (que por defecto solo
-escucha en localhost). Por eso mismo, Postgres se publica solo en `127.0.0.1:5433` (cambiable con
-`POSTGRES_HOST_PORT`) y la web se conecta por ahí. Para comprobar Ollama desde el contenedor:
-
-```bash
-docker compose exec web python -c "import httpx; print(httpx.get('http://127.0.0.1:11434/api/tags', trust_env=False).text)"
-```
-
-Si Ollama está en otra máquina, pon su dirección en `OLLAMA_URL`.
+**OpenCode Go:** es un servicio externo (HTTPS), así que no hace falta nada en el host. La clave se saca de
+la consola de OpenCode (Console › API keys) y se pone en `OPENCODE_API_KEY`. La URL por defecto es
+`https://opencode.ai/inference/go/openai/v1`; si usas otro gateway compatible con OpenAI, cámbiala con
+`OPENCODE_BASE_URL`. El contenedor `web` sigue usando la red del host (`network_mode: host`) para llegar a
+Postgres en `127.0.0.1:5433` (cambiable con `POSTGRES_HOST_PORT`) y publicar el 8085.
 
 ## Modelo de datos
 
@@ -86,7 +82,7 @@ Debajo de cada receta aparecen hasta 3 **recetas parecidas**: las que comparten 
 **Imágenes:** se pueden subir como archivo o indicar una URL; en ese caso el servidor descarga la imagen
 y la guarda en la BBDD (no se enlaza). Por seguridad solo se descargan URLs `http(s)` que apunten a IPs
 públicas, también tras las redirecciones, así nadie puede usar la web para llegar a servicios internos
-como Ollama o Postgres. Máximo 5 MB, y el formato se comprueba por el contenido: JPEG, PNG, GIF, WebP o AVIF.
+como Postgres. Máximo 5 MB, y el formato se comprueba por el contenido: JPEG, PNG, GIF, WebP o AVIF.
 No se admite SVG, porque puede contener scripts.
 
 **Tags en la portada:** se muestran los 5 con más recetas, más los que estén seleccionados; el resto se buscan

@@ -1,4 +1,4 @@
-# Configuración base = producción (sin proxy, IA con Ollama).
+# Configuración base = producción (sin proxy, IA con OpenCode Go).
 # En dev se combina con docker-compose.dev.yml (ver README).
 services:
   db:
@@ -25,7 +25,7 @@ services:
   web:
     build: ./app
     restart: unless-stopped
-    # Red del host: la web llega a Ollama en 127.0.0.1:11434 (Ollama solo escucha en localhost)
+    # Red del host: la web se conecta a Postgres en 127.0.0.1:5433
     # y publica directamente el puerto 8085.
     network_mode: host
     command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8085"]
@@ -38,12 +38,13 @@ services:
       PGDATABASE: ${POSTGRES_DB:-recetas}
       PGUSER: ${POSTGRES_USER:-recetas}
       PGPASSWORD: ${POSTGRES_PASSWORD:-recetas}
-      # IA para "Testutik sortu": ollama (producción, por defecto) o anthropic (dev). Ver .env.example.
-      LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
+      # IA para "Testutik sortu": opencode (producción, por defecto) o anthropic (dev). Ver .env.example.
+      LLM_PROVIDER: ${LLM_PROVIDER:-opencode}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-opus-5-5}
-      OLLAMA_URL: ${OLLAMA_URL:-http://127.0.0.1:11434}
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b}
+      OPENCODE_BASE_URL: ${OPENCODE_BASE_URL:-https://opencode.ai/inference/go/openai/v1}
+      OPENCODE_API_KEY: ${OPENCODE_API_KEY:-}
+      OPENCODE_MODEL: ${OPENCODE_MODEL:-deepseek-v4.1-flash}
       LLM_TIMEOUT: ${LLM_TIMEOUT:-300}
 
 volumes:
